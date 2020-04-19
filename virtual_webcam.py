@@ -12,6 +12,8 @@ import yaml
 import time
 from pyfakewebcam import FakeWebcam
 
+from scipy import ndimage
+
 from bodypix_functions import calc_padding
 from bodypix_functions import scale_and_crop_to_input_tensor_shape
 from bodypix_functions import to_input_resolution_height_and_width
@@ -317,6 +319,27 @@ def mainloop():
     overlays_idx = config.get("overlays_idx", 0)
     overlays = load_images(overlays, config.get("overlay_image", ""), height, width,
         "overlays", get_imagefilters(config.get("overlay_filters", [])))
+
+    center_of_mass = np.array(ndimage.center_of_mass(mask))
+    # Attribution: http://cliparts.co/angel-halo-pictures
+    halo = cv2.imread("halo.png", cv2.IMREAD_UNCHANGED)
+    halo = cv2.resize(halo, (200, 100))
+    center_of_halo = np.array([halo.shape[0] / 2, halo.shape[1] / 2])
+    coord_from = np.clip(center_of_mass - center_of_halo,
+        np.array([0,0]), np.array(frame.shape[:2])).astype(int)
+    coord_to = np.clip(center_of_mass + center_of_halo,
+        np.array([0, 0]), np.array(frame.shape[:2])).astype(int)
+
+    coord_from[0] = max(coord_from[0] - 500, 0)
+    coord_to[0] = coord_from[0] + halo.shape[0]
+
+    overlay = halo
+    overlay[:,:,0], overlay[:,:,2] = overlay[:,:,2], overlay[:,:,0].copy()
+    for c in range(3):
+        # TODO: overlay must be clipped as well
+        print("test")
+        frame[coord_from[0]:coord_to[0],coord_from[1]:coord_to[1],c] = frame[coord_from[0]:coord_to[0],coord_from[1]:coord_to[1],c] * (1.0 - overlay[:,:,3] / 255.0) + \
+            overlay[:,:,c] * (overlay[:,:,3] / 255.0)
 
     if overlays:
         overlay = overlays[overlays_idx]

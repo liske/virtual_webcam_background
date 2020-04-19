@@ -272,6 +272,15 @@ def mainloop():
     mask = tf.dtypes.cast(mask, tf.int32)
     mask = np.reshape(mask, mask.shape[:2])
 
+    part_heatmaps = results[2]
+    part_heatmaps = scale_and_crop_to_input_tensor_shape(
+        part_heatmaps, input_height, input_width,
+        padT, padB, padL, padR, True
+    )
+    part_segmentation = to_mask_tensor(part_heatmaps, 0.999)
+    part_segmentation = tf.dtypes.cast(part_segmentation, tf.int32)
+    part_segmentation = np.array(part_segmentation)
+
     # Average over the last N masks to reduce flickering
     # (at the cost of seeing afterimages)
     masks.insert(0, mask)
@@ -320,24 +329,35 @@ def mainloop():
     overlays = load_images(overlays, config.get("overlay_image", ""), height, width,
         "overlays", get_imagefilters(config.get("overlay_filters", [])))
 
-    center_of_mass = np.array(ndimage.center_of_mass(mask))
+    face_mask = np.bitwise_or(part_segmentation[:,:,0], part_segmentation[:,:,1])
+    center_of_mass = np.array(ndimage.center_of_mass(face_mask))
+
     # Attribution: http://cliparts.co/angel-halo-pictures
     halo = cv2.imread("halo.png", cv2.IMREAD_UNCHANGED)
     halo = cv2.resize(halo, (200, 100))
     center_of_halo = np.array([halo.shape[0] / 2, halo.shape[1] / 2])
-    coord_from = np.clip(center_of_mass - center_of_halo,
-        np.array([0,0]), np.array(frame.shape[:2])).astype(int)
-    coord_to = np.clip(center_of_mass + center_of_halo,
-        np.array([0, 0]), np.array(frame.shape[:2])).astype(int)
 
-    coord_from[0] = max(coord_from[0] - 500, 0)
-    coord_to[0] = coord_from[0] + halo.shape[0]
+    mask_top = ndimage.find_objects(face_mask)[0][0].start
+    halo_top = int(mask_top - halo.shape[0])
+    halo_left = int(center_of_mass[1] - center_of_halo[1])
+
+    #coord_from = np.clip(center_of_mass - center_of_halo,
+    #    np.array([0,0]), np.array(frame.shape[:2])).astype(int)
+    #coord_to = np.clip(center_of_mass + center_of_halo,
+    #    np.array([0, 0]), np.array(frame.shape[:2])).astype(int)
+    #
+    #coord_from[0] = max(coord_from[0] - 500, 0)
+    #coord_to[0] = coord_from[0] + halo.shape[0]
+
+    coord_from = np.array([halo_top, halo_left])
+    coord_to = np.array([halo_top + halo.shape[0], halo_left + halo.shape[1]])
 
     overlay = halo
     overlay[:,:,0], overlay[:,:,2] = overlay[:,:,2], overlay[:,:,0].copy()
     for c in range(3):
         # TODO: overlay must be clipped as well
-        print("test")
+        print(coord_from)
+        print(coord_to)
         frame[coord_from[0]:coord_to[0],coord_from[1]:coord_to[1],c] = frame[coord_from[0]:coord_to[0],coord_from[1]:coord_to[1],c] * (1.0 - overlay[:,:,3] / 255.0) + \
             overlay[:,:,c] * (overlay[:,:,3] / 255.0)
 
